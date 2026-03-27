@@ -8,13 +8,10 @@ public class Wallpaper {
 }
 "@
 
-while ($true) {
-    if (Test-Path $wallpaperPath) {
-        [Wallpaper]::SystemParametersInfo(20, 0, $wallpaperPath, 3)
-        RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters
-    } else {
-        Write-Host "Image not found: $wallpaperPath"
-    }
 
-    Start-Sleep -Seconds 600
+if (Test-Path $wallpaperPath) {
+    [Wallpaper]::SystemParametersInfo(20, 0, $wallpaperPath, 3)
+    RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters
+} else {
+    Write-Host "Image not found: $wallpaperPath"
 }

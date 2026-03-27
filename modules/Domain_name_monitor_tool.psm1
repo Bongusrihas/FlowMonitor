@@ -20,7 +20,10 @@ function Get-DomainNames {
     $Tshark = "C:\Program Files\Wireshark\tshark.exe"
     $prev = ""
     $currentInterface = -1
-
+    if (!(Test-Path "C:\Program Files\Wireshark\tshark.exe")) {
+        Write-Host "tshark not found. Install Wireshark."
+        exit
+    }
     while ($true) {
         $conn = Get-Connection
         if (-not $conn) {

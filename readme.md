@@ -90,7 +90,7 @@ flowdomain --date YYYY-MM-DD
 flowdomain --time HH:MM:SS
 flowdomain --date YYYY-MM-DD --time HH:MM:SS
 ```
-
+* Note : Time was in 24 hours format
 ---
 
 ## 📝 Notes

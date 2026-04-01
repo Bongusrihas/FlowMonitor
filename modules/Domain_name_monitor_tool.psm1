@@ -1,14 +1,13 @@
 function Get-Interfaces {
-    $tsharkList = tshark -D
-
+    $tsharkList = & tshark -D 2>$null
     $interfaces = @()
 
     foreach ($line in $tsharkList) {
-        if ($line -match '^(\d+)\.\s+.+\((.+)\)') {
+        if ($line -match '^(\d+)\.\s+(.*)$') {
             $idx = [int]$matches[1]
-            $name = $matches[2].ToLower()
+            $desc = $matches[2].ToLower()
 
-            if ($name -match 'wi-?fi' -or $name -match 'ethernet') {
+            if ($desc -match 'wi-?fi|wlan|ethernet') {
                 $interfaces += $idx
             }
         }
@@ -23,11 +22,18 @@ function Get-DomainNames {
         [string]$OutputFile = "$PSScriptRoot\..\logs\domains_log.csv"
     )
 
-    $Tshark = "C:\Program Files\Wireshark\tshark.exe"
+    # Auto-detect tshark
+    $Tshark = (Get-Command tshark -ErrorAction SilentlyContinue).Source
 
-    if (!(Test-Path $Tshark)) {
-        Write-Host "tshark not found."
+    if (-not $Tshark) {
+        Write-Host "tshark not found in PATH."
         return
+    }
+
+    # Ensure log directory exists
+    $dir = Split-Path $OutputFile
+    if (!(Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir | Out-Null
     }
 
     $processes = @{}
@@ -40,7 +46,7 @@ function Get-DomainNames {
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $Tshark
-        $psi.Arguments = "-i $iface -l -q -Y `"dns || tls`" -T fields -e dns.qry.name -e tls.handshake.extensions_server_name"
+        $psi.Arguments = "-i $iface -l -n -q -Y `"dns || tls.handshake.extensions_server_name`" -T fields -e dns.qry.name -e tls.handshake.extensions_server_name"
         $psi.RedirectStandardOutput = $true
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
@@ -55,8 +61,10 @@ function Get-DomainNames {
     function Stop-All {
         foreach ($p in $processes.Values) {
             if ($p -and -not $p.HasExited) {
-                $p.Kill()
-                $p.WaitForExit()
+                try {
+                    $p.Kill()
+                    $p.WaitForExit()
+                } catch {}
             }
         }
         $processes.Clear()
@@ -72,14 +80,13 @@ function Get-DomainNames {
 
     while ($true) {
 
-        # READ FROM ALL PROCESSES
-        foreach ($iface in $processes.Keys) {
+        foreach ($iface in @($processes.Keys)) {
 
             $proc = $processes[$iface]
 
             if ($proc -and -not $proc.HasExited) {
 
-                while ($proc.StandardOutput.Peek() -ge 0) {
+                while (!$proc.StandardOutput.EndOfStream) {
 
                     $line = $proc.StandardOutput.ReadLine()
                     if (-not $line) { continue }
@@ -89,6 +96,8 @@ function Get-DomainNames {
                     foreach ($domain in $parts) {
 
                         if ($domain -and $domain -match "^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$") {
+
+                            $domain = $domain.Trim()
 
                             if ($domain -ne $prev) {
 
@@ -105,17 +114,16 @@ function Get-DomainNames {
             }
         }
 
-        # RECHECK INTERFACES EVERY 5 MINUTES
+        # Check for interface changes every 5 min
         if ((Get-Date) - $lastCheck -gt (New-TimeSpan -Minutes 5)) {
 
             $newIfaces = Get-Interfaces
 
-            if (-not (@($newIfaces) -join ',' -eq @($currentIfaces) -join ',')) {
+            if (@($newIfaces) -join ',' -ne @($currentIfaces) -join ',') {
 
-                Write-Host "Interface change detected. Restarting all captures..."
+                Write-Host "Interface change detected. Restarting..."
 
                 Stop-All
-
                 $processes = @{}
 
                 foreach ($iface in $newIfaces) {
@@ -129,11 +137,13 @@ function Get-DomainNames {
             $lastCheck = Get-Date
         }
 
-        # OPTIONAL: restart if completely silent
+        # Restart if no traffic
         if ((Get-Date) - $lastSeen -gt (New-TimeSpan -Minutes 5)) {
-            Write-Host "No traffic detected. Restarting captures..."
+
+            Write-Host "No traffic detected. Restarting..."
 
             Stop-All
+            $processes = @{}
 
             foreach ($iface in $currentIfaces) {
                 $processes[$iface] = Start-Capture $iface
